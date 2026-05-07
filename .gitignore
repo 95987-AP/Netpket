@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+.DS_Store
+
+# Documentation / planning files
+FUNCTIONALITY_QOL_README.md
+MAESTRO_AUDIT.md
+networklab_trainer_agent_prompt_plan.md
+.omx/
