@@ -876,7 +876,7 @@ export default function App() {
     <div className="app-shell">
       <header className="topbar">
         <div className="brand-lockup">
-          <img className="brand-logo" src="/brand/netpket-logo-text.png" alt="Netpket" />
+          <img className="brand-logo" src={`${import.meta.env.BASE_URL}brand/netpket-logo-text.png`} alt="Netpket" />
           <div className="subtle">{scenario.name} / {scenario.difficulty} / Score {scenarioScore}%</div>
         </div>
         <div className="status-strip" role="status">
