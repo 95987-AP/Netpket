@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="public/brand/netpket-logo-text.png" alt="Netpket" width="360" />
+<img src="public/brand/graylogotext.png" alt="Netpket" width="360" />
 
 **A browser-based networking learning lab with a deterministic simulator, IOS-like CLI, and a retro workbench UI.**
 
