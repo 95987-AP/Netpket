@@ -67,6 +67,31 @@ async function selectScenario(page, scenarioId) {
   await page.waitForTimeout(100);
 }
 
+async function assertEndpointBadgesDoNotOverlap(page) {
+  const boxes = await page.locator(".link-badge.endpoint-label rect").evaluateAll((nodes) => nodes.map((node, index) => {
+    const rect = node.getBoundingClientRect();
+    return {
+      index,
+      label: node.parentElement?.textContent?.trim() || `badge-${index}`,
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      bottom: rect.bottom,
+    };
+  }));
+  for (let leftIndex = 0; leftIndex < boxes.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < boxes.length; rightIndex += 1) {
+      const left = boxes[leftIndex];
+      const right = boxes[rightIndex];
+      const overlapX = Math.min(left.right, right.right) - Math.max(left.left, right.left);
+      const overlapY = Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top);
+      if (overlapX > 1 && overlapY > 1) {
+        throw new Error(`Endpoint badges overlap: ${left.label} and ${right.label}.`);
+      }
+    }
+  }
+}
+
 async function validate(page, expected) {
   await page.getByRole("button", { name: "Validate Scenario" }).click();
   await page.waitForTimeout(120);
@@ -254,6 +279,8 @@ async function qolCommandCoverage(page) {
 
 async function scenarioTwo(page) {
   await selectScenario(page, "s2");
+  await page.locator(".link-badge.endpoint-label rect").first().waitFor();
+  await assertEndpointBadgesDoNotOverlap(page);
   await runCommands(page, [
     "select r1", "en", "conf t", "int g0/0", "ip address 192.168.20.1 255.255.255.0", "no shut", "exit",
     "ip dhcp excluded-address 192.168.20.1 192.168.20.20",

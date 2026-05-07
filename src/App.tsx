@@ -33,6 +33,9 @@ type WorkspaceBounds = { minX: number; minY: number; maxX: number; maxY: number;
 type AddDeviceMenu = { clientX: number; clientY: number; x: number; y: number } | null;
 type Point = { x: number; y: number };
 type RoutedLink = { points: Point[]; path: string; fromLabel: Point; toLabel: Point };
+type LinkEndpointSide = "left" | "right" | "top" | "bottom";
+type LinkBadgeLayout = { x: number; y: number; width: number; height: number; textX: number; textY: number };
+type RoutedLinkLayout = { link: Link; route: RoutedLink; fromBadge: LinkBadgeLayout; toBadge: LinkBadgeLayout };
 type ServerServiceName = keyof Device["services"];
 type ServerServicesTab = "dhcp" | "dns" | "www" | "mail";
 type ServerServiceAction =
@@ -184,6 +187,7 @@ export default function App() {
   const simulator = useMemo(() => new Simulator(lab), [lab]);
   const recipePreview = useMemo(() => previewRecipe(recipeDraft), [recipeDraft]);
   const workspaceBounds = useMemo(() => computeWorkspaceBounds(Object.values(lab.devices)), [lab.devices]);
+  const routedLinks = useMemo(() => layoutRoutedLinks(lab), [lab]);
   const scenarioProgress = lab.progress[lab.currentScenarioId];
   const scenarioScore = scenarioProgress?.score ?? lab.score;
   const scenarioDomain = DOMAIN_BY_SCENARIO[lab.currentScenarioId] || "";
@@ -1036,13 +1040,7 @@ export default function App() {
                   viewBox={`${workspaceBounds.minX} ${workspaceBounds.minY} ${workspaceBounds.width} ${workspaceBounds.height}`}
                   aria-label="Topology links"
                 >
-                  {lab.links.map((link, index) => {
-                    const from = lab.devices[link.from];
-                    const to = lab.devices[link.to];
-                    if (!from || !to) return null;
-                    const route = routedLink(from, to, index);
-                    const fromBadge = linkBadge(route.fromLabel, link.fromIf);
-                    const toBadge = linkBadge(route.toLabel, link.toIf);
+                  {routedLinks.map(({ link, route, fromBadge, toBadge }) => {
                     const active = lab.lastFlow?.pathLinks.includes(link.id);
                     const selectedLinkActive = selectedLinkId === link.id;
                     const routingStatus = dynamicRoutingLinkStatus(lab, link);
@@ -1330,6 +1328,170 @@ function routedLink(from: Device, to: Device, index = 0): RoutedLink {
     fromLabel: labelPointOutsideDevice(from, points[1]),
     toLabel: labelPointOutsideDevice(to, points[points.length - 2]),
   };
+}
+
+function labelSideForDevice(device: Device, point: Point): LinkEndpointSide {
+  const anchor = anchorForDevice(device);
+  const dx = point.x - anchor.x;
+  const dy = point.y - anchor.y;
+  if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? "right" : "left";
+  return dy >= 0 ? "bottom" : "top";
+}
+
+function layoutRoutedLinks(lab: LabState): RoutedLinkLayout[] {
+  type LinkEndpointLayout = {
+    layout: RoutedLinkLayout;
+    endpoint: "from" | "to";
+    deviceId: string;
+    side: LinkEndpointSide;
+    point: Point;
+    toward: Point;
+    label: string;
+  };
+
+  function applyEndpointPoint(endpoint: LinkEndpointLayout, point: Point) {
+    endpoint.point = point;
+    const badge = linkBadge(point, endpoint.label);
+    if (endpoint.endpoint === "from") {
+      endpoint.layout.route.fromLabel = point;
+      endpoint.layout.fromBadge = badge;
+    } else {
+      endpoint.layout.route.toLabel = point;
+      endpoint.layout.toBadge = badge;
+    }
+  }
+
+  function badgeForEndpoint(endpoint: LinkEndpointLayout): LinkBadgeLayout {
+    return endpoint.endpoint === "from" ? endpoint.layout.fromBadge : endpoint.layout.toBadge;
+  }
+
+  function compareEndpoints(left: LinkEndpointLayout, right: LinkEndpointLayout): number {
+    return left.deviceId.localeCompare(right.deviceId)
+      || left.side.localeCompare(right.side)
+      || left.layout.link.id.localeCompare(right.layout.link.id)
+      || left.endpoint.localeCompare(right.endpoint);
+  }
+
+  function badgeOverlap(left: LinkBadgeLayout, right: LinkBadgeLayout): { x: number; y: number } {
+    return {
+      x: Math.min(left.x + left.width, right.x + right.width) - Math.max(left.x, right.x),
+      y: Math.min(left.y + left.height, right.y + right.height) - Math.max(left.y, right.y),
+    };
+  }
+
+  function moveEndpointAwayFromCollision(left: LinkEndpointLayout, right: LinkEndpointLayout, overlap: { x: number; y: number }) {
+    const leftVertical = left.side === "left" || left.side === "right";
+    const rightVertical = right.side === "left" || right.side === "right";
+    const order = compareEndpoints(left, right) <= 0 ? -1 : 1;
+
+    if (leftVertical && rightVertical) {
+      const shift = Math.ceil(overlap.y / 2) + 4;
+      applyEndpointPoint(left, { x: left.point.x, y: left.point.y + order * shift });
+      applyEndpointPoint(right, { x: right.point.x, y: right.point.y - order * shift });
+      return;
+    }
+
+    if (!leftVertical && !rightVertical) {
+      const shift = Math.ceil(overlap.x / 2) + 4;
+      applyEndpointPoint(left, { x: left.point.x + order * shift, y: left.point.y });
+      applyEndpointPoint(right, { x: right.point.x - order * shift, y: right.point.y });
+      return;
+    }
+
+    const verticalEndpoint = leftVertical ? left : right;
+    const horizontalEndpoint = leftVertical ? right : left;
+    const verticalDirection = compareEndpoints(verticalEndpoint, horizontalEndpoint) <= 0 ? -1 : 1;
+    applyEndpointPoint(verticalEndpoint, { x: verticalEndpoint.point.x, y: verticalEndpoint.point.y + verticalDirection * (Math.ceil(overlap.y / 2) + 4) });
+    applyEndpointPoint(horizontalEndpoint, { x: horizontalEndpoint.point.x - verticalDirection * (Math.ceil(overlap.x / 2) + 4), y: horizontalEndpoint.point.y });
+  }
+
+  function resolveBadgeCollisions() {
+    for (let pass = 0; pass < 6; pass += 1) {
+      let moved = false;
+      const ordered = endpoints.slice().sort(compareEndpoints);
+      for (let leftIndex = 0; leftIndex < ordered.length; leftIndex += 1) {
+        for (let rightIndex = leftIndex + 1; rightIndex < ordered.length; rightIndex += 1) {
+          const left = ordered[leftIndex];
+          const right = ordered[rightIndex];
+          const overlap = badgeOverlap(badgeForEndpoint(left), badgeForEndpoint(right));
+          if (overlap.x > 1 && overlap.y > 1) {
+            moveEndpointAwayFromCollision(left, right, overlap);
+            moved = true;
+          }
+        }
+      }
+      if (!moved) return;
+    }
+  }
+
+  const endpoints: LinkEndpointLayout[] = [];
+  const layouts = lab.links.flatMap((link, index) => {
+    const from = lab.devices[link.from];
+    const to = lab.devices[link.to];
+    if (!from || !to) return [];
+
+    const route = routedLink(from, to, index);
+    const layout: RoutedLinkLayout = {
+      link,
+      route,
+      fromBadge: linkBadge(route.fromLabel, link.fromIf),
+      toBadge: linkBadge(route.toLabel, link.toIf),
+    };
+
+    endpoints.push({
+      layout,
+      endpoint: "from",
+      deviceId: from.id,
+      side: labelSideForDevice(from, route.fromLabel),
+      point: route.fromLabel,
+      toward: route.points[1],
+      label: link.fromIf,
+    });
+    endpoints.push({
+      layout,
+      endpoint: "to",
+      deviceId: to.id,
+      side: labelSideForDevice(to, route.toLabel),
+      point: route.toLabel,
+      toward: route.points[route.points.length - 2],
+      label: link.toIf,
+    });
+
+    return [layout];
+  });
+
+  const groups = new Map<string, LinkEndpointLayout[]>();
+  endpoints.forEach((endpoint) => {
+    const groupKey = `${endpoint.deviceId}:${endpoint.side}`;
+    groups.set(groupKey, [...(groups.get(groupKey) || []), endpoint]);
+  });
+
+  groups.forEach((group) => {
+    if (group.length < 2) return;
+
+    const verticalStack = group[0].side === "left" || group[0].side === "right";
+    const spacing = verticalStack
+      ? Math.max(...group.map((endpoint) => linkBadge(endpoint.point, endpoint.label).height)) + 6
+      : Math.max(...group.map((endpoint) => linkBadge(endpoint.point, endpoint.label).width)) + 6;
+    const center = (group.length - 1) / 2;
+    const sorted = group.slice().sort((left, right) => {
+      const leftSort = verticalStack ? left.toward.y : left.toward.x;
+      const rightSort = verticalStack ? right.toward.y : right.toward.x;
+      return leftSort - rightSort || left.layout.link.id.localeCompare(right.layout.link.id);
+    });
+
+    sorted.forEach((endpoint, endpointIndex) => {
+      const offset = Math.round((endpointIndex - center) * spacing);
+      const point = verticalStack
+        ? { x: endpoint.point.x, y: endpoint.point.y + offset }
+        : { x: endpoint.point.x + offset, y: endpoint.point.y };
+      applyEndpointPoint(endpoint, point);
+    });
+  });
+
+  resolveBadgeCollisions();
+
+  return layouts;
 }
 
 function linkBadge(point: Point, label: string) {
