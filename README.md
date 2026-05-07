@@ -2,6 +2,8 @@
 
 <img src="public/brand/graylogotext.png" alt="Netpket" width="360" />
 
+<p><a href="https://netpket.online/">netpket.online</a></p>
+
 **A browser-based networking learning lab with a deterministic simulator, IOS-like CLI, and a retro workbench UI.**
 
 [Getting Started](#getting-started) &middot; [Architecture](#architecture--technical-decisions) &middot; [Scenarios](#scenario-walkthrough) &middot; [Tech Stack](#tech-stack)
