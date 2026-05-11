@@ -20,7 +20,12 @@ function endpointMatches(lab: LabState, deviceId: string, ip: string, mask: stri
 function routeExists(lab: LabState, deviceId: string, network: string, mask: string, nextHop: string): boolean {
   const router = device(lab, deviceId);
   const normalized = networkAddress(network, mask);
-  return Boolean(router?.staticRoutes.some((route) => route.network === normalized && route.mask === mask && route.nextHop === nextHop));
+  return Boolean(router?.staticRoutes.some((route) => {
+    if (route.network !== normalized || route.mask !== mask) return false;
+    if (route.nextHop === nextHop) return true;
+    const iface = getInterface(router, route.interface || "");
+    return Boolean(iface?.ip && iface.mask && ipInSubnet(nextHop, iface.ip, iface.mask));
+  }));
 }
 
 function dhcpPoolMatches(lab: LabState, deviceId: string, network: string, mask: string, gateway: string, dns: string): boolean {

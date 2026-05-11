@@ -2,6 +2,8 @@ import type { AclEndpoint, AclEntry, Device, DynamicRoutingProcess, LabState, Pr
 import { getInterface, isValidIp, isValidMask, networkAddress, normalizeInterfaceName } from "./ip";
 import { addEvent, interfaceText, selectedDevice, Simulator } from "./simulator";
 
+const IP_ROUTE_USAGE = "ip route <network> <mask> <next-hop|interface> [next-hop]";
+
 function matches(token: string | undefined, full: string, min = 1): boolean {
   return Boolean(token && token.length >= min && full.startsWith(token.toLowerCase()));
 }
@@ -65,6 +67,10 @@ function ensurePolicyClass(device: Device, policyName: string | null, className:
     policy.classes.push(policyClass);
   }
   return policyClass;
+}
+
+function staticRouteLine(route: Device["staticRoutes"][number]): string {
+  return ["ip route", route.network, route.mask, route.interface || "", route.nextHop || ""].filter(Boolean).join(" ");
 }
 
 export function isTerminalClearCommand(rawCommand: string): boolean {
@@ -162,7 +168,7 @@ function helpText(device: Device): string {
     "  interface <name> | int g0/0",
     "  ip address <ip> <mask>",
     "  no shutdown | shutdown",
-    "  ip route <network> <mask> <next-hop>",
+    `  ${IP_ROUTE_USAGE}`,
     "  router rip | router eigrp <asn> | router egrip <asn>",
     "  network <network> [wildcard]",
     "  ip dhcp excluded-address <start> [end]",
@@ -252,7 +258,7 @@ function baseSuggestions(device: Device | null): string[] {
       ...interfaceTargets.filter((candidate) => candidate.startsWith("interface") || candidate.startsWith("int")),
       "interface <name>",
       "ip address <ip> <mask>",
-      "ip route <network> <mask> <next-hop>",
+      IP_ROUTE_USAGE,
       "router rip",
       "router eigrp <asn>",
       "router egrip <asn>",
@@ -581,13 +587,32 @@ function configCommand(device: Device, tokens: string[], lower: string[]): strin
   if (verb !== "ip") return unknownCommand(tokens.join(" "), baseSuggestions(device).filter((candidate) => candidate.toLowerCase().startsWith(verb || "")));
 
   if (matches(lower[1], "route", 2)) {
-    if (!tokens[2] || !tokens[3] || !tokens[4]) return "% Incomplete command. Usage: ip route <network> <mask> <next-hop>";
-    if (!isValidIp(tokens[2]) || !isValidIp(tokens[4])) return "% Invalid IP address.";
+    if (!tokens[2] || !tokens[3] || !tokens[4]) return `% Incomplete command. Usage: ${IP_ROUTE_USAGE}`;
+    if (!isValidIp(tokens[2])) return "% Invalid IP address.";
     if (!isValidMask(tokens[3])) return "% Invalid subnet mask.";
+    let nextHop = "";
+    let interfaceName = "";
+    const targetInterface = findInterface(device, tokens[4]);
+    if (isValidIp(tokens[4])) {
+      if (tokens[5]) return `% Invalid route. Usage: ${IP_ROUTE_USAGE}`;
+      nextHop = tokens[4];
+    } else if (targetInterface) {
+      if (tokens[5] && !isValidIp(tokens[5])) return "% Invalid IP address.";
+      if (tokens[6]) return `% Invalid route. Usage: ${IP_ROUTE_USAGE}`;
+      interfaceName = targetInterface.name;
+      nextHop = tokens[5] || "";
+    } else {
+      return `% Invalid next-hop or interface '${tokens[4]}'. Usage: ${IP_ROUTE_USAGE}`;
+    }
     const network = networkAddress(tokens[2], tokens[3]);
     const existing = device.staticRoutes.find((route) => route.network === network && route.mask === tokens[3]);
-    if (existing) existing.nextHop = tokens[4];
-    else device.staticRoutes.push({ network, mask: tokens[3], nextHop: tokens[4], metric: 1 });
+    if (existing) {
+      existing.nextHop = nextHop;
+      existing.interface = interfaceName;
+      existing.metric = 1;
+    } else {
+      device.staticRoutes.push({ network, mask: tokens[3], nextHop, interface: interfaceName, metric: 1 });
+    }
     return "";
   }
 
@@ -974,7 +999,7 @@ function runningConfig(device: Device): string {
   });
   device.dhcpExcluded.forEach((range) => lines.push(range.start === range.end ? `ip dhcp excluded-address ${range.start}` : `ip dhcp excluded-address ${range.start} ${range.end}`));
   device.dhcpPools.forEach((pool) => lines.push(`ip dhcp pool ${pool.name}`, ` network ${pool.network} ${pool.mask}`, ` default-router ${pool.defaultRouter}`, ` dns-server ${pool.dnsServer}`, "!"));
-  device.staticRoutes.forEach((route) => lines.push(`ip route ${route.network} ${route.mask} ${route.nextHop}`));
+  device.staticRoutes.forEach((route) => lines.push(staticRouteLine(route)));
   Object.values(device.acls).forEach((acl) => {
     lines.push(`ip access-list extended ${acl.name}`);
     acl.entries.forEach((entry) => {

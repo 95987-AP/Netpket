@@ -939,7 +939,10 @@ export class Simulator {
     if (!rows.length) return "% Route table empty.";
     return rows.map((route) => {
       if (route.source === "connected") return `C ${route.network}/${route.prefix} is directly connected, ${route.interface}`;
-      if (route.source === "static") return `S ${route.network}/${route.prefix} [1/0] via ${route.nextHop || route.interface || "unresolved"}`;
+      if (route.source === "static") {
+        const target = route.nextHop ? `via ${route.nextHop}` : route.interface ? `via ${route.interface}` : "via unresolved";
+        return `S ${route.network}/${route.prefix} [1/0] ${route.interface && route.nextHop ? `${target}, ${route.interface}` : target}`;
+      }
       const code = route.source === "rip" ? "R" : "D";
       return `${code} ${route.network}/${route.prefix} [${route.metric}/0] via ${route.nextHop || "unresolved"}, ${route.interface}`;
     }).join("\n");

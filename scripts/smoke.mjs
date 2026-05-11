@@ -391,6 +391,36 @@ async function scenarioFour(page) {
     "ip route 192.168.40.0 255.255.255.0 10.0.12.1", "end",
   ]);
   await validate(page, "5/5 checks passed");
+  await runCommands(page, ["select pc1", "ping 192.168.41.10"]);
+  await page.locator(".terminal-history").getByText("Reply from 192.168.41.10", { exact: false }).waitFor();
+}
+
+async function staticRouteInterfaceCoverage(page) {
+  await selectScenario(page, "s4");
+  await endpoint(page, "pc1", "192.168.40.10", "255.255.255.0", "192.168.40.1");
+  await endpoint(page, "pc2", "192.168.41.10", "255.255.255.0", "192.168.41.1");
+  await runCommands(page, [
+    "select r1", "en", "conf t", "int g0/0", "ip address 192.168.40.1 255.255.255.0", "no shut", "exit",
+    "int g0/1", "ip address 10.0.12.1 255.255.255.252", "no shut", "exit",
+    "ip route 192.168.41.0 255.255.255.0 g0/1 10.0.12.2", "end",
+    "select r2", "en", "conf t", "int g0/0", "ip address 10.0.12.2 255.255.255.252", "no shut", "exit",
+    "int g0/1", "ip address 192.168.41.1 255.255.255.0", "no shut", "exit",
+    "ip route 192.168.40.0 255.255.255.0 g0/0 10.0.12.1", "end",
+    "select r1", "show running-config",
+  ]);
+  await page.locator(".terminal-line.output").getByText("ip route 192.168.41.0 255.255.255.0 g0/1 10.0.12.2", { exact: true }).waitFor();
+  await validate(page, "5/5 checks passed");
+  await runCommands(page, ["select pc1", "ping 192.168.41.10"]);
+  await page.locator(".terminal-history").getByText("Reply from 192.168.41.10", { exact: false }).last().waitFor();
+  await runCommands(page, [
+    "select r1", "conf t", "ip route 192.168.41.0 255.255.255.0 g0/1", "end",
+    "select r2", "conf t", "ip route 192.168.40.0 255.255.255.0 g0/0", "end",
+    "select r1", "show running-config",
+  ]);
+  await page.locator(".terminal-line.output").getByText("ip route 192.168.41.0 255.255.255.0 g0/1", { exact: true }).waitFor();
+  await validate(page, "5/5 checks passed");
+  await runCommands(page, ["select pc1", "ping 192.168.41.10"]);
+  await page.locator(".terminal-history").getByText("Reply from 192.168.41.10", { exact: false }).last().waitFor();
 }
 
 async function scenarioFive(page) {
@@ -467,6 +497,7 @@ try {
   await servicesAndQosCoverage(page);
   await dynamicRoutingCoverage(page);
   await scenarioFour(page);
+  await staticRouteInterfaceCoverage(page);
   await scenarioFive(page);
   await scenarioSixBadAclOrder(page);
   await scenarioSix(page);
