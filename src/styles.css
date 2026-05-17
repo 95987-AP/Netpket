@@ -16,7 +16,7 @@
   --warn: #8b6f00;
   --bad: #b00000;
   --font-ui: "Chicago", "Charcoal", "Geneva", "Monaco", "Courier New", system-ui, sans-serif;
-  --font-mono: "Monaco", "Courier New", monospace;
+  --font-mono: "Consolas", ui-monospace, "SFMono-Regular", "Menlo", "Monaco", "Liberation Mono", "Courier New", monospace;
 }
 
 body[data-theme="dark"] {
@@ -388,6 +388,13 @@ body.resizing * {
 
 .review-panel {
   grid-area: review;
+}
+
+.workbench-panel {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 6px;
+  overflow: hidden;
 }
 
 h2,
@@ -1012,10 +1019,22 @@ h3 {
 
 .terminal-history {
   min-height: 0;
+  background: #020707;
+  color: #f2fffd;
+  border-color: #000000 #6ecdc8 #6ecdc8 #000000;
+  padding: 12px;
+  font-size: 14px;
+  line-height: 1.55;
+  font-weight: 600;
+}
+
+.terminal-panel .terminal-header span {
+  color: #005c58;
+  font-weight: 800;
 }
 
 .terminal-line.command {
-  color: #9be2ff;
+  color: #31f6e9;
 }
 
 .terminal-line.error {
@@ -1035,16 +1054,41 @@ h3 {
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 5px;
+  padding: 6px;
+  background: #020707;
+  border: 1px solid var(--border);
+  border-color: #000000 #6ecdc8 #6ecdc8 #000000;
 }
 
 .terminal-input-row span,
 .terminal-header span {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .terminal-input-row input {
   min-width: 0;
+  min-height: 30px;
+  background: #061211;
+  color: #31f6e9;
+  border-color: #104846 #6ecdc8 #6ecdc8 #104846;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  caret-color: #31f6e9;
+}
+
+.terminal-input-row span {
+  color: #31f6e9;
+  font-weight: 800;
+}
+
+.terminal-input-row button {
+  min-height: 30px;
+  color: #001d1a;
+  background: #8ff8ef;
+  border-color: #dffffb #001d1a #001d1a #dffffb;
+  font-weight: 800;
 }
 
 .cli-hints {
@@ -1262,6 +1306,131 @@ h3 {
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: 11px;
+}
+
+.workbench-tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  min-height: 26px;
+}
+
+.workbench-tabs button {
+  flex: 1 1 96px;
+  min-width: 0;
+  min-height: 24px;
+  padding: 3px 6px;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.workbench-tabs button.active {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--border);
+}
+
+.workbench-tool {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.debug-summary {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  background: var(--field);
+}
+
+.debug-summary p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.debug-summary.ok {
+  border-color: var(--ok) var(--border) var(--border) var(--ok);
+}
+
+.debug-summary.bad {
+  border-color: var(--bad) var(--border) var(--border) var(--bad);
+}
+
+.tool-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.issue-list {
+  display: grid;
+  gap: 6px;
+}
+
+.topology-issue {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 4px 7px;
+  text-align: left;
+  background: var(--field);
+}
+
+.topology-issue span {
+  grid-row: span 3;
+  align-self: start;
+  color: #ffffff;
+  border: 1px solid var(--border);
+  padding: 2px 4px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.topology-issue.critical span {
+  background: var(--bad);
+}
+
+.topology-issue.warning span {
+  background: var(--warn);
+}
+
+.topology-issue.info span {
+  background: var(--ok);
+}
+
+.topology-issue strong,
+.topology-issue small,
+.topology-issue code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.topology-issue small {
+  color: var(--muted);
+  line-height: 1.25;
+}
+
+.topology-issue code {
+  width: fit-content;
+  max-width: 100%;
+  padding: 2px 4px;
+  background: #111111;
+  color: #31f6e9;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.export-tool button {
+  width: 100%;
+  min-height: 30px;
+  text-align: left;
 }
 
 .validation {

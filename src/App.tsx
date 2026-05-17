@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEven
 import { SCENARIOS, SCENARIO_MAP } from "./data/scenarios";
 import { cliPrompt, commandSuggestions, completeCliCommand, isTerminalClearCommand, navigateHistory, pushHistory, runCliCommand, selectedInterfacesText } from "./lib/cli";
 import { deepClone, firstUsableIp, formatInterface, getInterface, ipInSubnet, isValidIp, isValidMask, lastUsableIp, maskToPrefix, networkAddress, prefixToMask } from "./lib/ip";
-import { addEvent, addTerminalLine, addTerminalOutput, createLabState, deviceStatus, dynamicRoutingLinkStatus, MODES, normalizeDevice, selectedDevice, Simulator, STORAGE_KEY } from "./lib/simulator";
+import { addEvent, addTerminalLine, addTerminalLineForDevice, addTerminalOutput, addTerminalOutputForDevice, clearTerminalForDevice, createLabState, deviceStatus, dynamicRoutingLinkStatus, MODES, normalizeDevice, selectedDevice, Simulator, STORAGE_KEY, terminalLinesForDevice } from "./lib/simulator";
 import { buildRecipeLab, previewRecipe, type RecipeOptions, type RecipePreview } from "./lib/topologyRecipe";
 import { validateScenario } from "./lib/validation";
+import { buildHtmlReport, buildProjectExport, diagnosticActionsForFlow, flowProblem, scanTopology, type TopologyIssue, type WorkbenchTool } from "./lib/workbench";
 import type { Device, DeviceType, LabState, Link, NetworkInterface, ValidationResult } from "./types";
 
 const SESSION_KEY = "netpket-session-v1";
@@ -164,6 +165,9 @@ export default function App() {
   const [cableSourceId, setCableSourceId] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState("");
+  const [activeWorkbenchTool, setActiveWorkbenchTool] = useState<WorkbenchTool>("debug");
+  const [topologyIssues, setTopologyIssues] = useState<TopologyIssue[]>([]);
+  const [lastScanAt, setLastScanAt] = useState("");
   const [guideOpen, setGuideOpen] = useState(initialGuideOpen);
   const [ipTableOpen, setIpTableOpen] = useState(false);
   const [recipeDraft, setRecipeDraft] = useState<RecipeOptions>({
@@ -177,6 +181,7 @@ export default function App() {
   });
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<HTMLDivElement | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const dragRef = useRef<{ id: string; dx: number; dy: number } | null>(null);
   const pendingDragRef = useRef<{ x: number; y: number } | null>(null);
   const dragFrameRef = useRef<number | null>(null);
@@ -193,8 +198,11 @@ export default function App() {
   const scenarioDomain = DOMAIN_BY_SCENARIO[lab.currentScenarioId] || "";
   const selectedLink = selectedLinkId ? lab.links.find((link) => link.id === selectedLinkId) || null : null;
   const cableSource = cableSourceId ? lab.devices[cableSourceId] || null : null;
+  const activeTerminalLines = terminalLinesForDevice(lab, selected);
   const cliHints = commandSuggestions(lab, command).slice(0, 4);
   const cliErrorHints = commandHintsForLatestError(lab, selected).slice(0, 3);
+  const activeFlowProblem = flowProblem(lab.lastFlow);
+  const activeFlowActions = diagnosticActionsForFlow(lab, lab.lastFlow);
   const packetFlowPath = useMemo(() => flowPathForLab(lab), [lab]);
   const layoutStyle = {
     "--left-panel-width": `${panelSizes.left}px`,
@@ -223,7 +231,7 @@ export default function App() {
     selectDevice: selectDeviceId,
     openGuide: () => setGuideOpen(true),
     setCommand: (nextCommand: string) => {
-      setCommand(nextCommand);
+      updateCommandDraft(nextCommand);
       focusCommandInput();
     },
   });
@@ -249,7 +257,11 @@ export default function App() {
 
   useEffect(() => {
     terminalRef.current?.scrollTo({ top: terminalRef.current.scrollHeight });
-  }, [lab.terminalLines]);
+  }, [activeTerminalLines.length, selected?.id]);
+
+  useEffect(() => {
+    setCommand(selected?.cli.commandDraft || "");
+  }, [selected?.id]);
 
   useEffect(() => {
     window.localStorage.setItem(LEFT_PANEL_KEY, String(leftPanelOpen));
@@ -315,6 +327,14 @@ export default function App() {
     });
   }
 
+  function updateCommandDraft(nextCommand: string) {
+    setCommand(nextCommand);
+    mutate((draft) => {
+      const device = selectedDevice(draft);
+      if (device) device.cli.commandDraft = nextCommand;
+    });
+  }
+
   function loadScenario(id: string) {
     const next = SCENARIO_MAP[id];
     if (!next) return;
@@ -342,6 +362,7 @@ export default function App() {
       const device = draft.devices[deviceId];
       if (!device) return;
       draft.selectedDeviceId = device.id;
+      if (suggestedCommand) device.cli.commandDraft = suggestedCommand;
       addEvent(draft, `Selected device: ${device.name}`);
     });
   }
@@ -439,7 +460,12 @@ export default function App() {
         const normalized = normalizeDevice(device);
         return [normalized.id, normalized];
       }));
-      setLab({ ...payload.lab, devices: normalizedDevices });
+      const loadedLab = { ...payload.lab, devices: normalizedDevices };
+      const loadedSelected = loadedLab.selectedDeviceId ? loadedLab.devices[loadedLab.selectedDeviceId] : null;
+      if (loadedSelected && !loadedSelected.cli.terminalLines.length && loadedLab.terminalLines?.length) {
+        loadedSelected.cli.terminalLines = [...loadedLab.terminalLines];
+      }
+      setLab(loadedLab);
       setValidation(null);
       setSelectedLinkId(null);
       setCableSourceId(null);
@@ -447,6 +473,70 @@ export default function App() {
     } catch {
       mutate((draft) => addEvent(draft, "Saved progress could not be parsed.", "error"));
     }
+  }
+
+  function downloadTextFile(filename: string, text: string, type: string) {
+    const blob = new Blob([text], { type });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportProjectJson() {
+    downloadTextFile(`netpket-${lab.currentScenarioId}.json`, JSON.stringify(buildProjectExport(lab), null, 2), "application/json");
+    mutate((draft) => addEvent(draft, "Project JSON exported.", "success"));
+  }
+
+  function exportHtmlReport() {
+    downloadTextFile(`netpket-${lab.currentScenarioId}-report.html`, buildHtmlReport(lab), "text/html");
+    mutate((draft) => addEvent(draft, "HTML report exported.", "success"));
+  }
+
+  async function importProjectFile(file: File) {
+    try {
+      const payload = JSON.parse(await file.text()) as { lab?: LabState };
+      if (!payload.lab || !SCENARIO_MAP[payload.lab.currentScenarioId]) throw new Error("Invalid Netpket project");
+      const normalizedDevices = Object.fromEntries(Object.values(payload.lab.devices || {}).map((device) => {
+        const normalized = normalizeDevice(device);
+        return [normalized.id, normalized];
+      }));
+      const loadedLab = { ...payload.lab, devices: normalizedDevices };
+      const loadedSelected = loadedLab.selectedDeviceId ? loadedLab.devices[loadedLab.selectedDeviceId] : null;
+      if (loadedSelected && !loadedSelected.cli.terminalLines.length && loadedLab.terminalLines?.length) {
+        loadedSelected.cli.terminalLines = [...loadedLab.terminalLines];
+      }
+      setLab(loadedLab);
+      setValidation(null);
+      setSelectedLinkId(null);
+      setCableSourceId(null);
+      setTopologyIssues([]);
+      setLastScanAt("");
+    } catch {
+      mutate((draft) => addEvent(draft, "Project import failed: invalid JSON or lab payload.", "error"));
+    }
+  }
+
+  function runTopologyScan() {
+    const issues = scanTopology(deepClone(lab));
+    setTopologyIssues(issues);
+    setLastScanAt(new Date().toLocaleTimeString());
+    mutate((draft) => addEvent(draft, `Topology scan complete: ${issues.length} item(s).`, issues.some((issue) => issue.severity === "critical") ? "warn" : "success"));
+  }
+
+  function applyDiagnosticAction(deviceId: string | undefined, commandText: string | undefined) {
+    if (deviceId) selectDeviceId(deviceId, commandText || "");
+    else if (commandText) updateCommandDraft(commandText);
+    focusCommandInput();
+  }
+
+  function focusTopologyIssue(issue: TopologyIssue) {
+    if (issue.linkId && !issue.deviceId) setSelectedLinkId(issue.linkId);
+    applyDiagnosticAction(issue.deviceId, issue.command);
   }
 
   function applyEndpointFields() {
@@ -574,14 +664,15 @@ export default function App() {
     mutate((draft) => {
       commands.forEach((raw) => {
         const device = selectedDevice(draft);
+        const terminalDeviceId = device?.id || null;
         if (device) pushHistory(device, raw);
         if (isTerminalClearCommand(raw)) {
-          draft.terminalLines = [];
+          clearTerminalForDevice(draft, terminalDeviceId);
           addEvent(draft, "Terminal cleared.", "info");
           return;
         }
-        addTerminalLine(draft, `${cliPrompt(draft)} ${raw}`);
-        addTerminalOutput(draft, runCliCommand(draft, raw));
+        addTerminalLineForDevice(draft, terminalDeviceId, `${cliPrompt(draft)} ${raw}`);
+        addTerminalOutputForDevice(draft, terminalDeviceId, runCliCommand(draft, raw));
       });
     });
   }
@@ -589,7 +680,7 @@ export default function App() {
   async function runCommand() {
     const raw = command.trim();
     if (!raw) return;
-    setCommand("");
+    updateCommandDraft("");
     await executeRawCommand(raw);
   }
 
@@ -610,14 +701,14 @@ export default function App() {
     if (event.key === "Tab") {
       event.preventDefault();
       const completion = completeCliCommand(lab, command);
-      if (completion.value && completion.value !== command) setCommand(completion.value);
+      if (completion.value && completion.value !== command) updateCommandDraft(completion.value);
       if (completion.message) mutate((draft) => addTerminalOutput(draft, completion.message || ""));
       return;
     }
     if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
     event.preventDefault();
     const next = navigateHistory(selected, event.key === "ArrowUp" ? -1 : 1, command);
-    if (next !== null) setCommand(next);
+    if (next !== null) updateCommandDraft(next);
   }
 
   function commitDragFrame() {
@@ -830,7 +921,7 @@ export default function App() {
       return;
     }
     if (hintCommand) {
-      setCommand(hintCommand);
+      updateCommandDraft(hintCommand);
       focusCommandInput();
     }
   }
@@ -1155,17 +1246,17 @@ export default function App() {
         <section className="panel terminal-panel">
           <div className="terminal-header">
             <h2>CLI</h2>
-            <span>{cliPrompt(lab)}</span>
+            <span>{selected ? `${selected.name} terminal` : "No device selected"}</span>
           </div>
           <div className="terminal-history" ref={terminalRef}>
-            {lab.terminalLines.map((line, index) => <div key={`${line}-${index}`} className={`terminal-line ${terminalLineClass(line)}`}>{line}</div>)}
+            {activeTerminalLines.map((line, index) => <div key={`${line}-${index}`} className={`terminal-line ${terminalLineClass(line)}`}>{line}</div>)}
           </div>
           <div className="terminal-input-row">
             <span>{cliPrompt(lab)}</span>
             <input
               aria-label="Command input"
               value={command}
-              onChange={(event) => setCommand(event.target.value)}
+              onChange={(event) => updateCommandDraft(event.target.value)}
               onKeyDown={onHistoryKey}
               placeholder={selected && (selected.type === "pc" || selected.type === "server") ? "ipconfig, ping, nslookup, curl" : "en, conf t, int g0/0, show ip route"}
             />
@@ -1173,67 +1264,60 @@ export default function App() {
           </div>
           <div className="cli-hints" aria-label="Command hints">
             {cliErrorHints.map((hint) => (
-              <button type="button" className="error-hint" key={`error-${hint}`} onClick={() => { setCommand(hint); focusCommandInput(); }}>{hint}</button>
+              <button type="button" className="error-hint" key={`error-${hint}`} onClick={() => { updateCommandDraft(hint); focusCommandInput(); }}>{hint}</button>
             ))}
             {cliHints.map((hint) => (
-              <button type="button" key={hint} onClick={() => { setCommand(hint); focusCommandInput(); }}>{hint}</button>
+              <button type="button" key={hint} onClick={() => { updateCommandDraft(hint); focusCommandInput(); }}>{hint}</button>
             ))}
           </div>
         </section>
 
-        <section className="panel review-panel">
+        <section className="panel review-panel workbench-panel">
           <div className="review-header">
-            <h2>Review</h2>
+            <h2>Tools</h2>
             <button type="button" className="btn-accent" onClick={runValidation}>Validate Scenario</button>
           </div>
-          {validation ? (
-            <div className="validation">
-              <strong>{validation.passed}/{validation.total} checks passed</strong>
-              {validation.checks.map((check) => (
-                check.pass ? (
-                  <div key={check.label} className="check pass">
-                    <span>PASS</span>
-                    <strong>{check.label}</strong>
-                  </div>
-                ) : (
-                  <button type="button" key={check.label} className="check fail fix-check" onClick={() => applyValidationHint(check.label)}>
-                    <span>FIX</span>
-                    <strong>{check.label}</strong>
-                    <small>{validationHintText(check.label)}</small>
-                  </button>
-                )
-              ))}
-            </div>
-          ) : (
-            <p className="empty">Run validation when the lab is configured.</p>
+          <div className="workbench-tabs" role="tablist" aria-label="Workbench tools">
+            <button type="button" className={activeWorkbenchTool === "debug" ? "active" : ""} onClick={() => setActiveWorkbenchTool("debug")}>Test Debug{lab.lastFlow && !lab.lastFlow.success ? " !" : ""}</button>
+            <button type="button" className={activeWorkbenchTool === "scan" ? "active" : ""} onClick={() => setActiveWorkbenchTool("scan")}>Topology Scan{topologyIssues.some((issue) => issue.severity === "critical") ? " !" : ""}</button>
+            <button type="button" className={activeWorkbenchTool === "export" ? "active" : ""} onClick={() => setActiveWorkbenchTool("export")}>Export</button>
+          </div>
+          {activeWorkbenchTool === "debug" && (
+            <TestDebugTool
+              lab={lab}
+              validation={validation}
+              flowIssue={activeFlowProblem}
+              actions={activeFlowActions}
+              onAction={applyDiagnosticAction}
+              onValidationHint={applyValidationHint}
+            />
           )}
-          {lab.lastFlow && (
-            <div className="flow-debug">
-              <h3>Packet Debug</h3>
-              <strong>{lab.lastFlow.mode} {lab.lastFlow.success ? "success" : "blocked"}: {lab.lastFlow.sourceName} -&gt; {lab.lastFlow.target}</strong>
-              {lab.lastFlow.steps?.length > 0 ? (
-                <ol className="flow-steps">
-                  {lab.lastFlow.steps.map((step, index) => (
-                    <li key={`${step.kind}-${step.detail}-${index}`} className={`flow-step ${step.kind} ${step.status}`}>
-                      <span>{step.label}</span>
-                      <small>{step.detail}</small>
-                    </li>
-                  ))}
-                </ol>
-              ) : lab.lastFlow.reasons.length > 0 ? (
-                <ol>
-                  {lab.lastFlow.reasons.map((reason, index) => <li key={`${reason}-${index}`}>{reason}</li>)}
-                </ol>
-              ) : (
-                <p className="empty">No packet decisions recorded.</p>
-              )}
-              {lab.lastFlow.pathDevices.length > 0 && <p className="small-text">Path: {lab.lastFlow.pathDevices.map((id) => lab.devices[id]?.name || id).join(" -> ")}</p>}
-            </div>
+          {activeWorkbenchTool === "scan" && (
+            <TopologyScanTool
+              issues={topologyIssues}
+              lastScanAt={lastScanAt}
+              onScan={runTopologyScan}
+              onIssue={focusTopologyIssue}
+            />
           )}
-          <h3>Event Log</h3>
-          <ul className="event-log">
-            {lab.events.slice(-12).reverse().map((event, index) => <li key={`${event.time}-${index}`} className={event.level}>[{event.time}] {event.message}</li>)}
-          </ul>
+          {activeWorkbenchTool === "export" && (
+            <ExportTool
+              onJson={exportProjectJson}
+              onReport={exportHtmlReport}
+              onImport={() => importInputRef.current?.click()}
+            />
+          )}
+          <input
+            ref={importInputRef}
+            type="file"
+            accept="application/json,.json"
+            hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.currentTarget.value = "";
+              if (file) void importProjectFile(file);
+            }}
+          />
         </section>
       </main>
       {paletteOpen && (
@@ -1539,7 +1623,7 @@ function terminalLineClass(line: string): string {
 }
 
 function latestTerminalError(lab: LabState): string {
-  return [...lab.terminalLines].reverse().find((line) => terminalLineClass(line) === "error") || "";
+  return [...terminalLinesForDevice(lab, selectedDevice(lab))].reverse().find((line) => terminalLineClass(line) === "error") || "";
 }
 
 function commandHintsForLatestError(lab: LabState, selected: Device | null): string[] {
@@ -2099,6 +2183,128 @@ function LinkInspector({
         <li>Router links need addresses in matching subnets.</li>
         <li>Switch links usually only need the connected port to stay up.</li>
       </ul>
+    </div>
+  );
+}
+
+function TestDebugTool({
+  lab,
+  validation,
+  flowIssue,
+  actions,
+  onAction,
+  onValidationHint,
+}: {
+  lab: LabState;
+  validation: ValidationResult | null;
+  flowIssue: TopologyIssue | null;
+  actions: Array<{ label: string; command: string; deviceId?: string }>;
+  onAction: (deviceId: string | undefined, command: string | undefined) => void;
+  onValidationHint: (label: string) => void;
+}) {
+  const flow = lab.lastFlow;
+  return (
+    <div className="workbench-tool">
+      <section className={`debug-summary ${flow?.success ? "ok" : flow ? "bad" : ""}`}>
+        <strong>{flow ? `${flow.mode} ${flow.success ? "success" : "blocked"}: ${flow.sourceName} -> ${flow.target}` : "No packet test yet"}</strong>
+        <p>{flowIssue?.detail || "Run ping, curl, nslookup, mail, or traceroute to populate Test Debug."}</p>
+        {actions.length > 0 && (
+          <div className="tool-actions">
+            {actions.map((action) => (
+              <button type="button" key={`${action.deviceId}-${action.command}`} onClick={() => onAction(action.deviceId, action.command)}>
+                {action.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+      {flow?.steps?.length ? (
+        <ol className="flow-steps">
+          {flow.steps.map((step, index) => (
+            <li key={`${step.kind}-${step.detail}-${index}`} className={`flow-step ${step.kind} ${step.status}`}>
+              <span>{step.label}</span>
+              <small>{step.detail}</small>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      {flow?.pathDevices.length ? <p className="small-text">Path: {flow.pathDevices.map((id) => lab.devices[id]?.name || id).join(" -> ")}</p> : null}
+      <h3>Scenario Validation</h3>
+      {validation ? (
+        <div className="validation">
+          <strong>{validation.passed}/{validation.total} checks passed</strong>
+          {validation.checks.map((check) => (
+            check.pass ? (
+              <div key={check.label} className="check pass">
+                <span>PASS</span>
+                <strong>{check.label}</strong>
+              </div>
+            ) : (
+              <button type="button" key={check.label} className="check fail fix-check" onClick={() => onValidationHint(check.label)}>
+                <span>FIX</span>
+                <strong>{check.label}</strong>
+                <small>{validationHintText(check.label)}</small>
+              </button>
+            )
+          ))}
+        </div>
+      ) : (
+        <p className="empty">Run validation when the lab is configured.</p>
+      )}
+      <h3>Event Log</h3>
+      <ul className="event-log">
+        {lab.events.slice(-12).reverse().map((event, index) => <li key={`${event.time}-${index}`} className={event.level}>[{event.time}] {event.message}</li>)}
+      </ul>
+    </div>
+  );
+}
+
+function TopologyScanTool({
+  issues,
+  lastScanAt,
+  onScan,
+  onIssue,
+}: {
+  issues: TopologyIssue[];
+  lastScanAt: string;
+  onScan: () => void;
+  onIssue: (issue: TopologyIssue) => void;
+}) {
+  return (
+    <div className="workbench-tool">
+      <div className="tool-actions">
+        <button type="button" className="btn-accent" onClick={onScan}>Run Topology Scan</button>
+        {lastScanAt && <span className="small-text">Last scan: {lastScanAt}</span>}
+      </div>
+      <div className="issue-list">
+        {issues.length ? issues.map((issue) => (
+          <button type="button" key={issue.id} className={`topology-issue ${issue.severity}`} onClick={() => onIssue(issue)}>
+            <span>{issue.severity.toUpperCase()}</span>
+            <strong>{issue.title}</strong>
+            <small>{issue.detail}</small>
+            {issue.command && <code>{issue.command}</code>}
+          </button>
+        )) : <p className="empty">Run a scan to inspect interface state, gateways, services, routing, ACL, NAT, and basic reachability.</p>}
+      </div>
+    </div>
+  );
+}
+
+function ExportTool({
+  onJson,
+  onReport,
+  onImport,
+}: {
+  onJson: () => void;
+  onReport: () => void;
+  onImport: () => void;
+}) {
+  return (
+    <div className="workbench-tool export-tool">
+      <button type="button" className="btn-accent" onClick={onReport}>Export HTML Report</button>
+      <button type="button" onClick={onJson}>Download Project JSON</button>
+      <button type="button" onClick={onImport}>Import Project JSON</button>
+      <p className="small-text">HTML report is for reading and handoff. JSON is for restoring the full Netpket lab state later.</p>
     </div>
   );
 }

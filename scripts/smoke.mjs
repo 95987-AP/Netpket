@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
 
@@ -164,7 +165,7 @@ async function recipeBuilder(page) {
   await runCommand(page, "select pc1");
   await runCommand(page, "ping 15.1.1.1");
   await page.getByText("Reply from 15.1.1.1", { exact: false }).waitFor();
-  await page.getByText("Packet Debug").waitFor();
+  await page.locator(".debug-summary.ok").waitFor();
   await page.locator(".packet-dot").waitFor();
   await page.locator(".flow-route-path").waitFor();
   await page.locator(".flow-step").filter({ hasText: "Source" }).waitFor();
@@ -328,14 +329,18 @@ async function servicesAndQosCoverage(page) {
     "select pc1", "ipconfig /renew", "nslookup intranet.local", "curl intranet.local",
     "select srv1", "show services",
   ]);
+  await runCommand(page, "select pc1");
   await page.locator(".terminal-history").getByText("DHCP lease acquired", { exact: false }).waitFor();
   await page.locator(".terminal-line.output").filter({ hasText: "Netpket custom WWW page" }).first().waitFor();
+  await runCommand(page, "select srv1");
   await page.locator(".terminal-line.output").filter({ hasText: /^MAIL\s+enabled$/ }).waitFor();
   await runCommands(page, [
     "select pc1", "mail send mail.local admin hello from smoke",
     "select srv1", "show mail admin",
   ]);
+  await runCommand(page, "select pc1");
   await page.locator(".terminal-history").getByText("250 OK: queued mail for admin", { exact: false }).waitFor();
+  await runCommand(page, "select srv1");
   await page.locator(".terminal-line.output").getByText("hello from smoke", { exact: false }).waitFor();
   await runCommands(page, [
     "select r1", "en", "conf t", "mls qos", "class-map match-any WEB", "match protocol http", "exit",
@@ -475,6 +480,76 @@ async function scenarioSeven(page) {
   await validate(page, "7/7 checks passed");
 }
 
+async function terminalWorkbenchCoverage(page) {
+  await selectScenario(page, "s1");
+  await runCommands(page, [
+    "select r1", "en", "conf t", "int g0/0", "ip address 192.168.10.1 255.255.255.0", "no shut", "end",
+  ]);
+  await endpoint(page, "pc1", "192.168.10.10", "255.255.255.0", "192.168.10.1");
+
+  await runCommand(page, "select r1");
+  await runCommand(page, "show ip route");
+  await page.locator(".terminal-history").getByText("C 192.168.10.0/24", { exact: false }).waitFor();
+  await runCommand(page, "select pc1");
+  await runCommand(page, "ipconfig");
+  await page.locator(".terminal-history").getByText("192.168.10.10", { exact: false }).waitFor();
+  const pcTerminal = await page.locator(".terminal-history").innerText();
+  if (pcTerminal.includes("C 192.168.10.0/24")) throw new Error("PC terminal leaked R1 route history.");
+  await runCommand(page, "clear");
+  const clearedPcTerminal = await page.locator(".terminal-history").innerText();
+  if (clearedPcTerminal.trim()) throw new Error(`clear did not empty only the active PC terminal: ${clearedPcTerminal}`);
+  await runCommand(page, "select r1");
+  await page.locator(".terminal-history").getByText("C 192.168.10.0/24", { exact: false }).waitFor();
+  const r1Terminal = await page.locator(".terminal-history").innerText();
+  if (r1Terminal.includes("192.168.10.10")) throw new Error("R1 terminal leaked PC command output.");
+
+  await page.getByRole("button", { name: "Export", exact: true }).click();
+  await runCommands(page, ["select pc1", "ping 203.0.113.1"]);
+  await page.getByRole("button", { name: "Export HTML Report" }).waitFor();
+  await page.getByRole("button", { name: /Test Debug/ }).click();
+  await page.locator(".debug-summary.bad").waitFor();
+  await page.locator(".flow-step.bad").first().waitFor();
+  if (await page.locator(".debug-summary .tool-actions button").count() < 1) throw new Error("Test Debug did not expose diagnostic actions.");
+  await page.locator(".debug-summary .tool-actions button").first().click();
+  if (!(await page.locator(".terminal-input-row input").inputValue()).trim()) throw new Error("Diagnostic action did not prefill a command.");
+
+  await page.getByRole("button", { name: /Topology Scan/ }).click();
+  await page.getByRole("button", { name: "Run Topology Scan" }).click();
+  await page.locator(".topology-issue").first().waitFor();
+  if (await page.locator(".topology-issue").count() < 1) throw new Error("Topology Scan did not render issues.");
+  await page.locator(".topology-issue").first().click();
+  if (!(await page.locator(".terminal-input-row input").inputValue()).trim()) throw new Error("Topology issue click did not prefill a command.");
+
+  await page.getByRole("button", { name: "Export", exact: true }).click();
+  const [jsonDownload] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "Download Project JSON" }).click(),
+  ]);
+  const jsonPath = await jsonDownload.path();
+  if (!jsonPath) throw new Error("Project JSON download did not produce a local path.");
+  const jsonText = await readFile(jsonPath, "utf8");
+  if (!jsonText.includes("\"terminalLines\"") || !jsonText.includes("\"commandDraft\"")) {
+    throw new Error("Project JSON export does not include per-device terminal state.");
+  }
+
+  const [htmlDownload] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "Export HTML Report" }).click(),
+  ]);
+  const htmlPath = await htmlDownload.path();
+  if (!htmlPath) throw new Error("HTML report download did not produce a local path.");
+  const htmlText = await readFile(htmlPath, "utf8");
+  for (const expected of ["Running config", "Commands", "CLI transcript", "R1", "PC1"]) {
+    if (!htmlText.includes(expected)) throw new Error(`HTML report missed '${expected}'.`);
+  }
+
+  await selectScenario(page, "blank");
+  await page.setInputFiles("input[type='file']", jsonPath);
+  await page.locator(".device-node").filter({ hasText: "R1" }).waitFor();
+  await runCommand(page, "select r1");
+  await page.locator(".terminal-history").getByText("C 192.168.10.0/24", { exact: false }).waitFor();
+}
+
 try {
   await waitForServer();
   const browser = await chromium.launch();
@@ -502,11 +577,14 @@ try {
   await scenarioSixBadAclOrder(page);
   await scenarioSix(page);
   await scenarioSeven(page);
+  await terminalWorkbenchCoverage(page);
   await page.setViewportSize({ width: 390, height: 850 });
   await page.getByText("Logical Workspace").waitFor();
+  const mobileOverflow = await page.locator(".terminal-panel").evaluate((node) => node.scrollWidth - node.clientWidth);
+  if (mobileOverflow > 2) throw new Error(`Mobile CLI overflows horizontally by ${mobileOverflow}px.`);
   await browser.close();
   if (consoleErrors.length) throw new Error(`Console errors:\n${consoleErrors.join("\n")}`);
-  console.log("Smoke tests passed: render, logo, onboarding guide, blank workspace builder, right-click device creation, manual interfaces, cabling, ortho link routing, packet animation, cable/device deletion, scenario switching, CLI configuration, multi-command CLI paste, colored CLI output, CLI error hints, CLI QoL, badges/lamps, link inspector, command palette, collapsible panel, validation, RIP, EIGRP, QoS, NAT, ACL, DHCP, DNS, HTTP, MAIL, mobile viewport.");
+  console.log("Smoke tests passed: render, logo, onboarding guide, blank workspace builder, right-click device creation, manual interfaces, cabling, ortho link routing, packet animation, cable/device deletion, scenario switching, CLI configuration, per-device terminals, workbench debug/scan/export/import, multi-command CLI paste, colored CLI output, CLI error hints, CLI QoL, badges/lamps, link inspector, command palette, collapsible panel, validation, RIP, EIGRP, QoS, NAT, ACL, DHCP, DNS, HTTP, MAIL, mobile viewport.");
 } finally {
   server.kill("SIGTERM");
 }

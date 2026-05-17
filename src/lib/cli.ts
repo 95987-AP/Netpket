@@ -992,7 +992,7 @@ function interfaceConfigLines(iface: Device["interfaces"][number]): string[] {
   return lines;
 }
 
-function runningConfig(device: Device): string {
+export function runningConfig(device: Device): string {
   const lines = ["version 15.0", `hostname ${device.name}`, "!"];
   device.interfaces.forEach((iface) => {
     lines.push(...interfaceConfigLines(iface));
