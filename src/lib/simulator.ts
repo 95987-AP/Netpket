@@ -54,6 +54,8 @@ export function createDefaultCliState() {
     history: [],
     historyCursor: null,
     historyDraft: "",
+    terminalLines: [],
+    commandDraft: "",
   };
 }
 
@@ -115,10 +117,14 @@ export function createLabState(scenario: Scenario, prior?: Partial<LabState>): L
     const device = normalizeDevice(raw);
     devices[device.id] = device;
   });
+  const selectedDeviceId = scenario.devices[0]?.id || null;
+  if (selectedDeviceId && devices[selectedDeviceId] && !devices[selectedDeviceId].cli.terminalLines.length) {
+    devices[selectedDeviceId].cli.terminalLines = ["Netpket ready. Select a device and type help."];
+  }
 
   return {
     currentScenarioId: scenario.id,
-    selectedDeviceId: scenario.devices[0]?.id || null,
+    selectedDeviceId,
     mode: prior?.mode && MODES.includes(prior.mode) ? prior.mode : "Learn",
     theme: prior?.theme || "dark",
     devices,
@@ -141,13 +147,38 @@ export function addEvent(lab: LabState, message: string, level: "info" | "succes
 }
 
 export function addTerminalLine(lab: LabState, line: string) {
-  lab.terminalLines.push(line);
-  if (lab.terminalLines.length > 300) lab.terminalLines.shift();
+  const device = selectedDevice(lab);
+  const lines = device ? device.cli.terminalLines : lab.terminalLines;
+  lines.push(line);
+  if (lines.length > 300) lines.shift();
 }
 
 export function addTerminalOutput(lab: LabState, output: string) {
   if (!output) return;
   output.split("\n").forEach((line) => addTerminalLine(lab, line));
+}
+
+export function addTerminalLineForDevice(lab: LabState, deviceId: string | null | undefined, line: string) {
+  const device = deviceId ? lab.devices[deviceId] : null;
+  const lines = device ? device.cli.terminalLines : lab.terminalLines;
+  lines.push(line);
+  if (lines.length > 300) lines.shift();
+}
+
+export function addTerminalOutputForDevice(lab: LabState, deviceId: string | null | undefined, output: string) {
+  if (!output) return;
+  output.split("\n").forEach((line) => addTerminalLineForDevice(lab, deviceId, line));
+}
+
+export function clearTerminalForDevice(lab: LabState, deviceId: string | null | undefined) {
+  const device = deviceId ? lab.devices[deviceId] : null;
+  if (device) device.cli.terminalLines = [];
+  else lab.terminalLines = [];
+}
+
+export function terminalLinesForDevice(lab: LabState, device: Device | null): string[] {
+  if (device) return device.cli.terminalLines;
+  return lab.terminalLines;
 }
 
 export function deviceStatus(device: Device): "green" | "yellow" | "red" {

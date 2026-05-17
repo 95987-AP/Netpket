@@ -103,6 +103,8 @@ export interface CliState {
   history: string[];
   historyCursor: number | null;
   historyDraft: string;
+  terminalLines: string[];
+  commandDraft: string;
 }
 
 export interface DynamicNetwork {
