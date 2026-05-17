@@ -382,7 +382,7 @@ body.resizing * {
   grid-area: terminal;
   display: grid;
   grid-template-rows: auto 1fr auto auto;
-  gap: 6px;
+  gap: 0;
   overflow: hidden;
 }
 
@@ -1071,11 +1071,16 @@ h3 {
   min-height: 30px;
   background: #061211;
   color: #31f6e9;
-  border-color: #104846 #6ecdc8 #6ecdc8 #104846;
+  border-color: #000000 #303030 #303030 #000000;
   font-family: var(--font-mono);
   font-size: 14px;
   font-weight: 700;
   caret-color: #31f6e9;
+}
+
+.terminal-input-row input:focus-visible {
+  outline: 1px dotted #5f5f5f;
+  outline-offset: -4px;
 }
 
 .terminal-input-row span {
@@ -1085,10 +1090,15 @@ h3 {
 
 .terminal-input-row button {
   min-height: 30px;
-  color: #001d1a;
-  background: #8ff8ef;
-  border-color: #dffffb #001d1a #001d1a #dffffb;
+  color: var(--text);
+  background: var(--panel-2);
+  border-color: var(--edge-light) var(--border) var(--border) var(--edge-light);
   font-weight: 800;
+}
+
+.terminal-input-row button:hover,
+.terminal-input-row button:focus-visible {
+  background: #ffffff;
 }
 
 .cli-hints {
