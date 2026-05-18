@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEven
 import { SCENARIOS, SCENARIO_MAP } from "./data/scenarios";
 import { cliPrompt, commandSuggestions, completeCliCommand, isTerminalClearCommand, navigateHistory, pushHistory, runCliCommand, selectedInterfacesText } from "./lib/cli";
 import { deepClone, firstUsableIp, formatInterface, getInterface, ipInSubnet, isValidIp, isValidMask, lastUsableIp, maskToPrefix, networkAddress, prefixToMask } from "./lib/ip";
-import { addEvent, addTerminalLine, addTerminalLineForDevice, addTerminalOutput, addTerminalOutputForDevice, clearTerminalForDevice, createLabState, deviceStatus, dynamicRoutingLinkStatus, MODES, normalizeDevice, selectedDevice, Simulator, STORAGE_KEY, terminalLinesForDevice } from "./lib/simulator";
+import { addEvent, addTerminalLine, addTerminalLineForDevice, addTerminalOutput, addTerminalOutputForDevice, clearTerminalForDevice, createLabState, deviceStatus, dynamicRoutingLinkStatus, normalizeDevice, selectedDevice, Simulator, STORAGE_KEY, terminalLinesForDevice } from "./lib/simulator";
 import { buildRecipeLab, previewRecipe, type RecipeOptions, type RecipePreview } from "./lib/topologyRecipe";
 import { validateScenario } from "./lib/validation";
 import { buildHtmlReport, buildProjectExport, diagnosticActionsForFlow, flowProblem, scanTopology, type TopologyIssue, type WorkbenchTool } from "./lib/workbench";
@@ -193,8 +193,6 @@ export default function App() {
   const recipePreview = useMemo(() => previewRecipe(recipeDraft), [recipeDraft]);
   const workspaceBounds = useMemo(() => computeWorkspaceBounds(Object.values(lab.devices)), [lab.devices]);
   const routedLinks = useMemo(() => layoutRoutedLinks(lab), [lab]);
-  const scenarioProgress = lab.progress[lab.currentScenarioId];
-  const scenarioScore = scenarioProgress?.score ?? lab.score;
   const scenarioDomain = DOMAIN_BY_SCENARIO[lab.currentScenarioId] || "";
   const selectedLink = selectedLinkId ? lab.links.find((link) => link.id === selectedLinkId) || null : null;
   const cableSource = cableSourceId ? lab.devices[cableSourceId] || null : null;
@@ -969,51 +967,13 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <header className="topbar">
-        <div className="brand-lockup">
-          <img className="brand-logo" src={`${import.meta.env.BASE_URL}brand/netpket-logo-text.png`} alt="Netpket" />
-          <div className="subtle">{scenario.name} / {scenario.difficulty} / Score {scenarioScore}%</div>
-        </div>
-        <div className="status-strip" role="status">
-          <span>Selected: {selected ? selected.name : "None"}</span>
-          <span>Mode: {lab.mode}</span>
-          <span>{lab.lastFlow ? `${lab.lastFlow.mode}: ${lab.lastFlow.success ? "success" : "blocked"}` : "Packet flow idle"}</span>
-        </div>
-        <div className="controls">
-          <label className="mode-control">
-            Mode
-            <select aria-label="Mode selector" value={lab.mode} onChange={(event) => mutate((draft) => { draft.mode = event.target.value; })}>
-              {MODES.map((mode) => <option key={mode}>{mode}</option>)}
-            </select>
-          </label>
-          <button
-            type="button"
-            className="compact-control"
-            aria-label={leftPanelOpen ? "Hide Scenarios" : "Show Scenarios"}
-            aria-controls="scenario-panel"
-            aria-expanded={leftPanelOpen}
-            onClick={() => setLeftPanelOpen((current) => !current)}
-          >
-            {leftPanelOpen ? "Hide" : "Show"}
-          </button>
-          <button type="button" className="compact-control" onClick={() => setGuideOpen(true)}>Guide</button>
-          <button type="button" className="compact-control" onClick={() => setIpTableOpen(true)}>IP Table</button>
-          <label className="scenario-control">
-            Scenario
-            <select aria-label="Scenario selector" value={lab.currentScenarioId} onChange={(event) => loadScenario(event.target.value)}>
-              {SCENARIOS.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-            </select>
-          </label>
-          <button type="button" onClick={resetScenario}>Reset</button>
-          <button type="button" onClick={saveProgress}>Save</button>
-          <button type="button" onClick={loadProgress}>Load</button>
-          <button type="button" aria-label="Toggle high contrast theme" onClick={() => mutate((draft) => { draft.theme = draft.theme === "dark" ? "light" : "dark"; })}>
-            {lab.theme === "dark" ? "Platinum" : "Invert"}
-          </button>
-        </div>
-      </header>
-
       <main className={`layout ${leftPanelOpen ? "" : "left-collapsed"}`} style={layoutStyle}>
+        <header className="topbar">
+          <div className="brand-lockup">
+            <img className="brand-logo" src={`${import.meta.env.BASE_URL}brand/netpket-logo-text.png`} alt="Netpket" />
+            <div className="subtle">{scenario.name} / {scenario.difficulty}</div>
+          </div>
+        </header>
         {!leftPanelOpen && (
           <button
             type="button"
@@ -1033,6 +993,7 @@ export default function App() {
             <button
               type="button"
               className="panel-title-button"
+              aria-label="Hide Scenarios"
               aria-controls="scenario-panel"
               aria-expanded={leftPanelOpen}
               onClick={() => setLeftPanelOpen(false)}
@@ -1045,6 +1006,7 @@ export default function App() {
               <button
                 type="button"
                 key={item.id}
+                data-scenario-id={item.id}
                 className={`scenario-item ${item.id === lab.currentScenarioId ? "active" : ""}`}
                 onClick={() => loadScenario(item.id)}
               >
@@ -1123,6 +1085,16 @@ export default function App() {
             onPointerUp={pointerUp}
             onPointerCancel={pointerUp}
           >
+            <div className="canvas-actions" onPointerDown={(event) => event.stopPropagation()}>
+              <button type="button" onClick={() => setGuideOpen(true)}>Guide</button>
+              <button type="button" onClick={() => setIpTableOpen(true)}>IP Table</button>
+              <button type="button" onClick={resetScenario}>Reset</button>
+              <button type="button" onClick={saveProgress}>Save</button>
+              <button type="button" onClick={loadProgress}>Load</button>
+              <button type="button" aria-label="Toggle high contrast theme" onClick={() => mutate((draft) => { draft.theme = draft.theme === "dark" ? "light" : "dark"; })}>
+                {lab.theme === "dark" ? "Platinum" : "Invert"}
+              </button>
+            </div>
             <div className="workspace-content" style={workspaceContentStyle}>
               <div className="workspace-canvas" style={workspaceCanvasStyle}>
                 <svg

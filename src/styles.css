@@ -125,8 +125,8 @@ body.resizing * {
   height: 100dvh;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto 1fr;
-  gap: 8px;
+  grid-template-rows: 1fr;
+  gap: 0;
   padding: 8px;
   overflow: hidden;
   background:
@@ -143,11 +143,13 @@ body.resizing * {
 }
 
 .topbar {
+  grid-area: topbar;
   display: grid;
-  grid-template-columns: minmax(300px, 0.75fr) max-content minmax(0, 2fr);
-  gap: 7px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
   align-items: center;
-  padding: 4px 7px;
+  padding: 4px 7px 4px 8px;
+  overflow: hidden;
 }
 
 .brand-lockup {
@@ -261,8 +263,9 @@ body.resizing * {
   overflow: hidden;
   display: grid;
   grid-template-columns: var(--left-panel-width, 292px) 6px minmax(420px, 1fr) 6px var(--right-panel-width, 338px);
-  grid-template-rows: minmax(260px, 1fr) 6px minmax(164px, var(--bottom-panel-height, 25vh));
+  grid-template-rows: auto minmax(236px, 1fr) 6px minmax(164px, var(--bottom-panel-height, 25vh));
   grid-template-areas:
+    "topbar split-left workspace split-right right"
     "left split-left workspace split-right right"
     "split-bottom split-bottom split-bottom split-bottom split-bottom"
     "terminal terminal terminal review review";
@@ -318,12 +321,13 @@ body.resizing * {
 }
 
 .layout.left-collapsed {
-  grid-template-columns: minmax(520px, 1fr) 6px var(--right-panel-width, 338px);
-  grid-template-rows: minmax(260px, 1fr) 6px minmax(164px, var(--bottom-panel-height, 25vh));
+  grid-template-columns: minmax(230px, var(--left-panel-width, 292px)) minmax(420px, 1fr) 6px var(--right-panel-width, 338px);
+  grid-template-rows: auto minmax(236px, 1fr) 6px minmax(164px, var(--bottom-panel-height, 25vh));
   grid-template-areas:
-    "workspace split-right right"
-    "split-bottom split-bottom split-bottom"
-    "terminal review review";
+    "topbar workspace split-right right"
+    ". workspace split-right right"
+    "split-bottom split-bottom split-bottom split-bottom"
+    "terminal terminal review review";
 }
 
 .splitter {
@@ -622,6 +626,26 @@ h3 {
     repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.08) 0 1px, transparent 1px 20px),
     var(--panel-2);
   touch-action: none;
+}
+
+.canvas-actions {
+  position: absolute;
+  z-index: 8;
+  top: 4px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  max-width: calc(100% - 16px);
+  pointer-events: auto;
+}
+
+.canvas-actions button {
+  min-height: 23px;
+  padding: 2px 6px;
+  background: var(--panel-2);
+  white-space: nowrap;
 }
 
 .workspace-content {
@@ -1810,8 +1834,9 @@ h3 {
 
   .layout {
     grid-template-columns: minmax(250px, 300px) minmax(420px, 1fr);
-    grid-template-rows: 360px auto 220px;
+    grid-template-rows: auto 360px auto 220px;
     grid-template-areas:
+      "topbar workspace"
       "left workspace"
       "right workspace"
       "terminal review";
@@ -1819,8 +1844,9 @@ h3 {
 
   .layout.left-collapsed {
     grid-template-columns: minmax(420px, 1fr);
-    grid-template-rows: 360px auto 220px;
+    grid-template-rows: auto 360px auto 220px;
     grid-template-areas:
+      "topbar"
       "workspace"
       "right"
       "terminal"
@@ -1835,8 +1861,9 @@ h3 {
 
   .layout {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto auto auto;
+    grid-template-rows: auto auto auto auto auto auto;
     grid-template-areas:
+      "topbar"
       "left"
       "workspace"
       "right"
@@ -1846,8 +1873,9 @@ h3 {
 
   .layout.left-collapsed {
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto auto auto;
+    grid-template-rows: auto auto auto auto auto;
     grid-template-areas:
+      "topbar"
       "workspace"
       "right"
       "terminal"
@@ -1861,6 +1889,13 @@ h3 {
 
   .workspace {
     min-height: 320px;
+  }
+
+  .canvas-actions {
+    position: static;
+    margin: 4px;
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
   .form-grid {

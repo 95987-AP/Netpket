@@ -64,7 +64,10 @@ async function endpoint(page, deviceId, ip, mask, gateway, dns = "") {
 }
 
 async function selectScenario(page, scenarioId) {
-  await page.getByLabel("Scenario selector").selectOption(scenarioId);
+  if (await page.locator("#scenario-panel").isHidden()) {
+    await page.getByRole("button", { name: "Show scenarios panel" }).click();
+  }
+  await page.locator(`[data-scenario-id="${scenarioId}"]`).click();
   await page.waitForTimeout(100);
 }
 
@@ -137,7 +140,7 @@ async function blankWorkspaceBuilder(page) {
   await page.getByRole("menuitem", { name: "PC" }).click();
   await page.locator(".device-node").filter({ hasText: "PC1" }).waitFor();
   if (await page.locator(".device-glyph").count() < 2) throw new Error("Context-created device icons did not render.");
-  await page.getByText("Selected: PC1", { exact: false }).waitFor();
+  await page.locator(".device-node.selected").filter({ hasText: "PC1" }).waitFor();
   await page.getByRole("button", { name: "Add Interface" }).click();
   await page.locator(".prebox").filter({ hasText: "eth1: unconfigured" }).waitFor();
   await page.getByRole("button", { name: "Start Cable" }).click();
