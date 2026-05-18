@@ -275,6 +275,8 @@ async function qolCommandCoverage(page) {
   await page.getByRole("button", { name: "Hide Scenarios", exact: true }).click();
   await page.waitForTimeout(60);
   if (!(await page.locator("#scenario-panel").isHidden())) throw new Error("Scenario panel did not hide.");
+  const workspaceLeftAfterHide = await page.locator(".workspace-panel").evaluate((node) => Math.round(node.getBoundingClientRect().left));
+  if (workspaceLeftAfterHide > 40) throw new Error(`Workspace did not expand into the hidden scenarios panel space: left=${workspaceLeftAfterHide}px.`);
   await page.locator(".scenario-rail").waitFor();
   await page.locator(".scenario-rail").click();
   await page.waitForTimeout(60);

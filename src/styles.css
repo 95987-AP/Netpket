@@ -321,13 +321,20 @@ body.resizing * {
 }
 
 .layout.left-collapsed {
-  grid-template-columns: minmax(230px, var(--left-panel-width, 292px)) minmax(420px, 1fr) 6px var(--right-panel-width, 338px);
-  grid-template-rows: auto minmax(236px, 1fr) 6px minmax(164px, var(--bottom-panel-height, 25vh));
+  grid-template-columns: minmax(420px, 1fr) 6px var(--right-panel-width, 338px);
+  grid-template-rows: minmax(260px, 1fr) 6px minmax(164px, var(--bottom-panel-height, 25vh));
   grid-template-areas:
-    "topbar workspace split-right right"
-    ". workspace split-right right"
-    "split-bottom split-bottom split-bottom split-bottom"
-    "terminal terminal review review";
+    "workspace split-right right"
+    "split-bottom split-bottom split-bottom"
+    "terminal review review";
+}
+
+.layout.left-collapsed .topbar {
+  display: none;
+}
+
+.layout.left-collapsed .scenario-rail {
+  top: 0;
 }
 
 .splitter {
